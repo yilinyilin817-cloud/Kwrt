@@ -8,19 +8,37 @@
 
 name: Build OpenWrt
 
-on: 
+permissions:
+  contents: read
+
+on:
   repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Platform to build (this custom workflow is restricted to MediaTek Filogic)"
+        required: true
+        type: choice
+        default: mediatek_filogic
+        options:
+          - mediatek_filogic
+  pull_request:
+    branches:
+      - 25.12
+    paths:
+      - .github/workflows/Openwrt-AutoBuild.yml
+      - devices/mediatek_filogic/**
 
 env:
-  REPO_TOKEN: ${{ secrets.TOKEN_KIDDIN9 }}
-  PPPOE_USERNAME: ${{ secrets.PPPOE_USERNAME }}
-  PPPOE_PASSWD: ${{ secrets.PPPOE_PASSWD }}
-  SCKEY: ${{ secrets.SCKEY }}
-  TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-  DOCKER_ID: ${{ secrets.DOCKER_ID }}
-  DOCKER_PASSWD: ${{ secrets.DOCKER_PASSWD }}
+  REPO_TOKEN: ${{ github.event_name == 'repository_dispatch' && secrets.TOKEN_KIDDIN9 || '' }}
+  PPPOE_USERNAME: ${{ github.event_name == 'repository_dispatch' && secrets.PPPOE_USERNAME || '' }}
+  PPPOE_PASSWD: ${{ github.event_name == 'repository_dispatch' && secrets.PPPOE_PASSWD || '' }}
+  SCKEY: ${{ github.event_name == 'repository_dispatch' && secrets.SCKEY || '' }}
+  TELEGRAM_TOKEN: ${{ github.event_name == 'repository_dispatch' && secrets.TELEGRAM_TOKEN || '' }}
+  TELEGRAM_CHAT_ID: ${{ github.event_name == 'repository_dispatch' && secrets.TELEGRAM_CHAT_ID || '' }}
+  SSH_PRIVATE_KEY: ${{ github.event_name == 'repository_dispatch' && secrets.SSH_PRIVATE_KEY || '' }}
+  DOCKER_ID: ${{ github.event_name == 'repository_dispatch' && secrets.DOCKER_ID || '' }}
+  DOCKER_PASSWD: ${{ github.event_name == 'repository_dispatch' && secrets.DOCKER_PASSWD || '' }}
   TZ: Asia/Shanghai
 
 jobs:
@@ -31,13 +49,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ["${{ github.event.client_payload.target }}"]
+        target: ["${{ inputs.target || github.event.client_payload.target || 'mediatek_filogic' }}"]
         
     steps:
+    - name: Validate build target
+      env:
+        BUILD_TARGET: ${{ matrix.target }}
+      run: |
+        if [[ "$BUILD_TARGET" != "mediatek_filogic" ]]; then
+          echo "Unsupported build target: $BUILD_TARGET" >&2
+          exit 1
+        fi
+
     - name: Checkout
-      uses: actions/checkout@main
+      uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       with:
           fetch-depth: 0
+          ref: ${{ github.event.client_payload.ref || github.ref }}
 
     # - name: Set up secret file
       # run: |
@@ -61,23 +89,23 @@ jobs:
         echo "UPLOAD_FIRMWARE_FOR_RELEASE=${UPLOAD_FIRMWARE_FOR_RELEASE}" >> $GITHUB_ENV
         echo "UPLOAD_FIRMWARE_TO_COWTRANSFER=${UPLOAD_FIRMWARE_TO_COWTRANSFER}" >> $GITHUB_ENV
         echo "UPLOAD_FIRMWARE_TO_WETRANSFER=${UPLOAD_FIRMWARE_TO_WETRANSFER}" >> $GITHUB_ENV
-        sed -i "1a REPO_TOKEN=${{ secrets.TOKEN_KIDDIN9 }}" ${{ github.workspace }}/devices/common/diy.sh
+        sed -i "1a REPO_TOKEN=${REPO_TOKEN}" ${{ github.workspace }}/devices/common/diy.sh
         sed -i "1a TARGET=${{matrix.target}}" ${{ github.workspace }}/devices/common/diy.sh
 
     - name: Trigger Packages Update
       continue-on-error: true
       if: contains(github.event.action, 'pkg')
       run: |
-        status=$(curl -H "Authorization: token ${{ secrets.TOKEN_KIDDIN9 }}" -s "https://api.github.com/repos/kiddin9/op-packages/actions/runs" | jq -r '.workflow_runs[0].status')
+        status=$(curl -H "Authorization: token $REPO_TOKEN" -s "https://api.github.com/repos/kiddin9/op-packages/actions/runs" | jq -r '.workflow_runs[0].status')
         if [[ "$status" == "completed" ]]; then
           curl -X POST https://api.github.com/repos/kiddin9/op-packages/dispatches \
             -H "Accept: application/vnd.github.everest-preview+json" \
-            -H "Authorization: token ${{ secrets.TOKEN_KIDDIN9 }}" \
+            -H "Authorization: token $REPO_TOKEN" \
           --data '{"event_type": "update"}'
         fi
 
     - name: Free disk space
-      uses: coder-xiaomo/free-disk-space@main
+      uses: coder-xiaomo/free-disk-space@20bfc7937f5519190924e19e80c2061d03743e01
       with:
         tool-cache: false
         android: true
@@ -113,32 +141,32 @@ jobs:
 
     - name: Clone source code
       run: |
-        set -x
-        TAG_INFO="$(curl -gs -H 'Content-Type: application/json' \
-           -H "Authorization: Bearer ${{ secrets.TOKEN_KIDDIN9 }}" \
-           -X POST -d '{ "query": "query {repository(owner: \"openwrt\", name: \"openwrt\") {refs(refPrefix: \"refs/tags/\", first: 4, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {nodes {name target { ... on Tag {tagger {date}}}}}}}"}' https://api.github.com/graphql)"
-        TAG_DATE="$( echo ${TAG_INFO} | jq -r '.data.repository.refs.nodes[] | select(.name | startswith("v25")) | .target.tagger.date' | head -n 1)"
-        if [[ $(( ($(date +%s) - $(date -d "$TAG_DATE" +%s)) / 86400 )) -lt 10 || "${{ contains(github.event.action, 'tags') }}" == "true" ]]; then
-        REPO_BRANCH="$( echo ${TAG_INFO} | jq -r '.data.repository.refs.nodes[].name' | grep v25 | head -n 1)"
-        #REPO_BRANCH="openwrt-25.12"
-        else
-        REPO_BRANCH="openwrt-25.12"
+        set -euo pipefail
+        # A device settings.ini may pin REPO_BRANCH. Only query GitHub's
+        # latest tag when no branch was explicitly configured.
+        if [[ -z "${REPO_BRANCH:-}" && "$REPO_URL" == "https://github.com/openwrt/openwrt" ]]; then
+          TAG_INFO="$(curl -fsS -H 'Content-Type: application/json' \
+             -H "Authorization: Bearer $REPO_TOKEN" \
+             -X POST -d '{ "query": "query {repository(owner: \"openwrt\", name: \"openwrt\") {refs(refPrefix: \"refs/tags/\", first: 4, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {nodes {name target { ... on Tag {tagger {date}}}}}}}"}' https://api.github.com/graphql)"
+          TAG_DATE="$(echo "$TAG_INFO" | jq -r '.data.repository.refs.nodes[] | select(.name | startswith("v25")) | .target.tagger.date' | head -n 1)"
+          if [[ -n "$TAG_DATE" && $(( ($(date +%s) - $(date -d "$TAG_DATE" +%s)) / 86400 )) -lt 10 ]]; then
+            REPO_BRANCH="$(echo "$TAG_INFO" | jq -r '.data.repository.refs.nodes[].name' | grep '^v25' | head -n 1)"
+          else
+            REPO_BRANCH="openwrt-25.12"
+          fi
         fi
-        #echo "CONFIG_VERSION_REPO=\"https://dl.openwrt.ai/releases/`echo $REPO_BRANCH  | cut -d . -f 1,2 | sed -e 's/^v//'`\"">>devices/common/.config
-        if [[ ! "${{ env.REPO_BRANCH }}" && "$REPO_URL" == "https://github.com/openwrt/openwrt" ]]; then
-            git clone $REPO_URL -b $REPO_BRANCH openwrt
-        elif [[ ! "${{ env.REPO_BRANCH }}" ]]; then
-            git clone $REPO_URL openwrt
+
+        if [[ "${REPO_BRANCH:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+          git init -q openwrt
+          git -C openwrt remote add origin "$REPO_URL"
+          git -C openwrt fetch --depth 1 origin "$REPO_BRANCH"
+          git -C openwrt checkout --detach FETCH_HEAD
+        elif [[ -n "${REPO_BRANCH:-}" ]]; then
+          git clone --single-branch --branch "$REPO_BRANCH" "$REPO_URL" openwrt
         else
-            REPO_BRANCH="${{env.REPO_BRANCH}}"
-            if [[ ${#REPO_BRANCH} -lt 10 ]]; then
-                git clone $REPO_URL -b ${REPO_BRANCH} openwrt
-            else
-                git clone $REPO_URL openwrt
-                cd openwrt
-                git checkout ${REPO_BRANCH}
-            fi
+          git clone "$REPO_URL" openwrt
         fi
+        echo "OpenWrt source: $(git -C openwrt rev-parse HEAD)"
 
     - name: Free up disk space
       env:
@@ -195,13 +223,29 @@ jobs:
 
     - name: Apply patches
       run: |
+        set -euo pipefail
         cd openwrt
         cp -rn devices/common/patches devices/${{matrix.target}}/
-          if [ -n "$(ls -A devices/${{matrix.target}}/*.bin.patch 2>/dev/null)" ]; then
-            git apply devices/${{matrix.target}}/patches/*.bin.patch
-          fi
-          find "devices/${{matrix.target}}/patches" -maxdepth 1 -type f -name '*.revert.patch' -print0 | sort -z | xargs -I % -t -0 -n 1 sh -c "patch -d './' -R --no-backup-if-mismatch -p1 -F 1 -i '%'"
-          find "devices/${{matrix.target}}/patches" -maxdepth 1 -type f -name '*.patch' ! -name '*.revert.patch' ! -name '*.bin.patch' -print0 | sort -z | xargs -I % -t -0 -n 1 sh -c "patch -d './' --no-backup-if-mismatch -p1 -F 1 -i '%'"
+
+        mapfile -d '' reverts < <(find "devices/${{matrix.target}}/patches" -maxdepth 1 -type f -name '*.revert.patch' -print0 | sort -z)
+        for patch_file in "${reverts[@]}"; do
+          patch -d './' -R --no-backup-if-mismatch -p1 -F 1 -i "$patch_file"
+        done
+
+        mapfile -d '' binary_patches < <(find "devices/${{matrix.target}}/patches" -maxdepth 1 -type f -name '*.bin.patch' -print0 | sort -z)
+        if (( ${#binary_patches[@]} > 0 )); then
+          git apply --check "${binary_patches[@]}"
+          git apply "${binary_patches[@]}"
+        fi
+
+        mapfile -d '' patches < <(find "devices/${{matrix.target}}/patches" -maxdepth 1 -type f -name '*.patch' ! -name '*.revert.patch' ! -name '*.bin.patch' -print0 | sort -z)
+        for patch_file in "${patches[@]}"; do
+          fuzz=1
+          case "$(basename "$patch_file")" in
+            tr3600.patch|zz-cudy-tr3000-v2-mod.patch) fuzz=0 ;;
+          esac
+          patch -d './' --no-backup-if-mismatch -p1 -F "$fuzz" -i "$patch_file"
+        done
 
     - name: Defconfig
       run: |
@@ -214,8 +258,37 @@ jobs:
         fi
         cat .config
 
+    - name: Verify Cudy TR3000 v2-mod target
+      if: matrix.target == 'mediatek_filogic'
+      run: |
+        set -euo pipefail
+        cd openwrt
+        grep -Fx 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cudy_tr3000-v2-mod=y' .config
+        test -s target/linux/mediatek/dts/mt7981b-cudy-tr3000-v2-mod.dts
+        awk '
+          BEGIN { depth = 0; found = 0; invalid = 0 }
+          /^define Device\// {
+            if ($0 == "define Device/cudy_tr3000-v2-mod") {
+              if (found || depth != 0)
+                invalid = 1
+              found = 1
+            }
+            depth++
+          }
+          /^endef$/ && depth > 0 { depth-- }
+          END { if (invalid || !found || depth != 0) exit 1 }
+        ' target/linux/mediatek/image/filogic.mk
+        grep -Fq 'define Device/cudy_tr3000-v2-mod' target/linux/mediatek/image/filogic.mk
+        grep -Fxq 'TARGET_DEVICES += cudy_tr3000-v2-mod' target/linux/mediatek/image/filogic.mk
+        grep -Fq 'SUPPORTED_DEVICES += cudy,tr3000-v2-mod' target/linux/mediatek/image/filogic.mk
+        grep -Fq 'reg = <0x5c0000 0x0e280000>' target/linux/mediatek/dts/mt7981b-cudy-tr3000-v2-mod.dts
+        grep -Fq 'cudy,tr3000-v2-mod' target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
+        grep -Fq 'cudy,tr3000-v2-mod' target/linux/mediatek/filogic/base-files/etc/board.d/02_network
+        grep -Fq 'cudy,tr3000-v2-mod' target/linux/mediatek/filogic/base-files/etc/hotplug.d/ieee80211/11_fix_wifi_mac
+        echo 'TR3000 v2-mod source/profile checks passed.'
+
     - name: Cache
-      uses: stupidloud/cachewrtbuild@main
+      uses: stupidloud/cachewrtbuild@b729f807837dbc3455d02fd35192660d9b662121
       with:
         ccache: 'false'
         mixkey: ${{ matrix.target }}
@@ -223,7 +296,7 @@ jobs:
         prefix: ${{ github.workspace }}/openwrt
 
     - name: SSH connection to Actions
-      uses: kiddin9/debugger-action@master
+      uses: kiddin9/debugger-action@155c065b997e5fea15fa31799ae4f8f28f9fd0a7
       if: contains(github.event.action, 'ssh')
 
     - name: Compile the firmware
@@ -233,7 +306,17 @@ jobs:
         df -hT
         cd openwrt
         echo -e "$(($(nproc)+1)) thread compile"
-        make -j$(($(nproc)+1)) || { log=$(mktemp);make V=s &>$log; } || { tail -50 $log; curl -k --data chat_id="${{ env.TELEGRAM_CHAT_ID }}" --data "text=❌ OpenWrt ${{ env.VERSION }} ${{matrix.target}} 编译失败 😂" "https://api.telegram.org/bot${{ env.TELEGRAM_TOKEN }}/sendMessage";df -hT;exit 1; }
+        make -j$(($(nproc)+1)) || {
+          log=$(mktemp)
+          make V=s &>$log
+        } || {
+          tail -50 "$log"
+          if [[ -n "${TELEGRAM_TOKEN:-}" && "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            curl -k --data chat_id="${{ env.TELEGRAM_CHAT_ID }}" --data "text=❌ OpenWrt ${{ env.VERSION }} ${{matrix.target}} 编译失败 😂" "https://api.telegram.org/bot${{ env.TELEGRAM_TOKEN }}/sendMessage"
+          fi
+          df -hT
+          exit 1
+        }
         rm -rf staging_dir/toolchain-*/bin/*openwrt-linux-musl-lto-dump
         rm -rf staging_dir/toolchain-*/initial
         df -hT
@@ -250,8 +333,8 @@ jobs:
         echo "EMOJI=${Emoji[$[$RANDOM % ${#Emoji[@]}]]}" >> $GITHUB_ENV
 
     - name: Deploy imagebuilder to server
-      uses: easingthemes/ssh-deploy@main
-      if: env.SSH_PRIVATE_KEY && ! contains(github.event.action, 'noser')
+      uses: easingthemes/ssh-deploy@2cc5b27bf3029d0455dd5e09fe02633904031447
+      if: github.event_name == 'repository_dispatch' && env.SSH_PRIVATE_KEY && ! contains(github.event.action, 'noser')
       with:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         ARGS: "-avr --timeout=600 --include='kwrt-imagebuilder-*' --include='kwrt-*-initramfs*' --exclude='kwrt-*'"
@@ -263,7 +346,7 @@ jobs:
         TARGET: "/www/wwwroot/dl.openwrt.ai/releases/tmp/"
 
     - name: Upload firmware for artifact
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: env.UPLOAD_FIRMWARE_FOR_ARTIFACT == 'true'
       with:
         name: ${{ env.VERSION }}_${{matrix.target}}
@@ -272,7 +355,7 @@ jobs:
 
     - name: Create release
       id: create_release
-      if: env.REPO_TOKEN && env.UPLOAD_FIRMWARE_FOR_RELEASE == 'true'
+      if: github.event_name == 'repository_dispatch' && env.REPO_TOKEN && env.UPLOAD_FIRMWARE_FOR_RELEASE == 'true'
       continue-on-error: true
       run: |
         echo -e "墙内加速下载 🚀:\n" >> release.txt
@@ -282,9 +365,9 @@ jobs:
         [ ${{ env.NOTICE }} ] && echo -e "${{ env.NOTICE }}" >> release.txt || true
 
     - name: Upload firmware for release
-      uses: softprops/action-gh-release@master
+      uses: softprops/action-gh-release@6680cc089e59314c4460b839412c25fb6a71ce3b
       continue-on-error: true
-      if: env.REPO_TOKEN && env.UPLOAD_FIRMWARE_FOR_RELEASE == 'true'
+      if: github.event_name == 'repository_dispatch' && env.REPO_TOKEN && env.UPLOAD_FIRMWARE_FOR_RELEASE == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.TOKEN_KIDDIN9 }}
       with:
@@ -295,28 +378,29 @@ jobs:
     
     - name: WeChat notification
       continue-on-error: true
-      if: env.SCKEY
+      if: github.event_name == 'repository_dispatch' && env.SCKEY
       run: |
         # [ steps.compile.outputs.status == 'success' ] && curl https://sctapi.ftqq.com/${{ secrets.SCKEY }}.send?text=🎉OpenWrt_${{ env.VERSION }}_${{matrix.target}}编译完成😋|| curl https://sctapi.ftqq.com/${{ secrets.SCKEY }}.send?text=❌OpenWrt_${{ env.VERSION }}_${{matrix.target}}编译失败😂
 
     - name: Telegram notification
-      if: env.TELEGRAM_TOKEN && ! contains(github.event.action, 'notg')
+      if: github.event_name == 'repository_dispatch' && env.TELEGRAM_TOKEN && ! contains(github.event.action, 'notg')
       continue-on-error: true
       run: |
         curl -k --data chat_id="${{ env.TELEGRAM_CHAT_ID }}" --data "text=🎉 OpenWrt ${{ env.VERSION }} ${{matrix.target}} 编译成功 😋  https://dl.openwrt.ai/firmware/${{matrix.target}}/  ${{ env.COWURL }}   ${{ env.WETRANS }} 🚀" "https://api.telegram.org/bot${{ env.TELEGRAM_TOKEN }}/sendMessage"
 
     - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@main
+      uses: GitRML/delete-workflow-runs@6c7cf4852e73c46502ee79494d99f5b504cacc6d
       continue-on-error: true
+      if: github.event_name == 'repository_dispatch'
       with:
         token: ${{ secrets.TOKEN_KIDDIN9 }}
         retain_days: 100
         keep_minimum_runs: 0
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@master
+      uses: dev-drprasad/delete-older-releases@49df26ac460ea2b7f943d0e33244981fcdfaeea3
       continue-on-error: true
-      if: env.UPLOAD_FIRMWARE_FOR_RELEASE == 'true' && !cancelled()
+      if: github.event_name == 'repository_dispatch' && env.UPLOAD_FIRMWARE_FOR_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 15
         delete_tags: true

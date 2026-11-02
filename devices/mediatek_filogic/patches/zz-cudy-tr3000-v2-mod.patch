@@ -1,0 +1,64 @@
+diff --git a/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface b/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
+index ce2c5906b7432db69797dff665980a8b45520ee1..aec1db3d8fae0cb7dbf9f8f8c07f3e3425ed0dba 100644
+--- a/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
++++ b/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
+@@ -7,6 +7,7 @@ set_preinit_iface() {
+ 	cudy,tr3000-v1|\
+ 	cudy,tr3000-mod|\
+ 	cudy,tr3600-v1|\
++	cudy,tr3000-v2-mod|\
+ 	glinet,gl-mt2500|\
+ 	glinet,gl-mt2500-airoha|\
+ 	glinet,gl-mt3000|\
+diff --git a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
+index c66fdbaefad1a9ebe92f1f55e48055b43b23f243..6294f0333ac0adb94aa89ff283acb565dd0fa768 100644
+--- a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
++++ b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
+@@ -168,6 +168,7 @@ mediatek_setup_interfaces()
+ 	cudy,tr3000-v1|\
+ 	cudy,tr3000-mod|\
+ 	cudy,tr3600-v1|\
++	cudy,tr3000-v2-mod|\
+ 	glinet,gl-mt3600be|\
+ 	glinet,gl-mt2500|\
+ 	glinet,gl-mt2500-airoha|\
+diff --git a/target/linux/mediatek/filogic/base-files/etc/hotplug.d/ieee80211/11_fix_wifi_mac b/target/linux/mediatek/filogic/base-files/etc/hotplug.d/ieee80211/11_fix_wifi_mac
+index 10d9701543068c2197bc623f98a2e7894f626ac0..a7170d4dc37207fcca223b7420054f65cc965261 100644
+--- a/target/linux/mediatek/filogic/base-files/etc/hotplug.d/ieee80211/11_fix_wifi_mac
++++ b/target/linux/mediatek/filogic/base-files/etc/hotplug.d/ieee80211/11_fix_wifi_mac
+@@ -99,6 +99,7 @@ case "$board" in
+ 	cudy,tr3000-256mb-v1|\
+ 	cudy,tr3000-v1|\
+ 	cudy,tr3000-mod|\
++	cudy,tr3000-v2-mod|\
+ 	cudy,wr3000u-v1|\
+ 	cudy,wbr3000uax-v1|\
+ 	cudy,wbr3000uax-v1-ubootmod|\
+diff --git a/target/linux/mediatek/image/filogic.mk b/target/linux/mediatek/image/filogic.mk
+index 0f53528c6f5ec7a1d380fbd6858c2350e0532f44..1970ff4caa8e69c25abb131cffdaf3cf3b0a60fb 100644
+--- a/target/linux/mediatek/image/filogic.mk
++++ b/target/linux/mediatek/image/filogic.mk
+@@ -1282,6 +1282,23 @@ define Device/cudy_tr3000-v1
+ endef
+ TARGET_DEVICES += cudy_tr3000-v1
+ 
++define Device/cudy_tr3000-v2-mod
++  DEVICE_VENDOR := Cudy
++  DEVICE_MODEL := TR3000
++  DEVICE_VARIANT := v2 256MB
++  DEVICE_DTS := mt7981b-cudy-tr3000-v2-mod
++  DEVICE_DTS_DIR := ../dts
++  SUPPORTED_DEVICES += cudy,tr3000-v2-mod
++  UBINIZE_OPTS := -E 5
++  BLOCKSIZE := 128k
++  PAGESIZE := 2048
++  IMAGE_SIZE := 231936k
++  KERNEL_IN_UBI := 1
++  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
++  DEVICE_PACKAGES := kmod-usb3 kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware
++endef
++TARGET_DEVICES += cudy_tr3000-v2-mod
++
+ define Device/cudy_tr3000-mod
+   DEVICE_VENDOR := Cudy
+   DEVICE_MODEL := TR3000
