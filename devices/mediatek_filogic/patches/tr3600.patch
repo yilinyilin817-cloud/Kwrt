@@ -70,7 +70,7 @@ Link: https://github.com/openwrt/openwrt/pull/24581
  create mode 100644 target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
 
 diff --git a/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface b/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
-index 40b9a926c25c0c..970436866de727 100644
+index 93ab08d386e68315f4635bd2c1de4025e1099d99..ce2c5906b7432db69797dff665980a8b45520ee1 100644
 --- a/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
 +++ b/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
 @@ -6,6 +6,7 @@ set_preinit_iface() {
@@ -83,7 +83,7 @@ index 40b9a926c25c0c..970436866de727 100644
  	glinet,gl-mt3000|\
 diff --git a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
 new file mode 100644
-index 00000000000000..11eca3512895cf
+index 0000000000000000000000000000000000000000..11eca3512895cfc43c7258af709a7d2f2eba9211
 --- /dev/null
 +++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
 @@ -0,0 +1,279 @@
@@ -367,10 +367,10 @@ index 00000000000000..11eca3512895cf
 +	status = "okay";
 +};
 diff --git a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
-index 38ae810d5968ad..c780b3079adce1 100644
+index 289952f0c10deb44469ae511b4bd339a167c47b7..c66fdbaefad1a9ebe92f1f55e48055b43b23f243 100644
 --- a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
 +++ b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
-@@ -149,6 +149,7 @@ mediatek_setup_interfaces()
+@@ -167,6 +167,7 @@ mediatek_setup_interfaces()
  	cudy,tr3000-256mb-v1|\
  	cudy,tr3000-v1|\
  	cudy,tr3000-mod|\
@@ -379,10 +379,10 @@ index 38ae810d5968ad..c780b3079adce1 100644
  	glinet,gl-mt2500|\
  	glinet,gl-mt2500-airoha|\
 diff --git a/target/linux/mediatek/image/filogic.mk b/target/linux/mediatek/image/filogic.mk
-index f75a22d5c97ce1..f9fd7d166fa893 100644
+index ded4270b2b36244716baadc97cc3768749160fb0..0f53528c6f5ec7a1d380fbd6858c2350e0532f44 100644
 --- a/target/linux/mediatek/image/filogic.mk
 +++ b/target/linux/mediatek/image/filogic.mk
-@@ -1298,6 +1298,25 @@ define Device/cudy_tr3000-mod
+@@ -1297,6 +1297,25 @@ define Device/cudy_tr3000-mod
  endef
  TARGET_DEVICES += cudy_tr3000-mod
  
